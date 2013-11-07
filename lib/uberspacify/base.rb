@@ -118,19 +118,22 @@ RewriteRule ^(.*)$ http://localhost:#{fetch :passenger_port}/$1 [P]
     end
   end
 
+  def time_pathsafe
+    Time.now.strftime("%Y%m%d%H%M%S")
+  end
+
   def to_past_filename(file)
-    current_time = Time.now.strftime("%Y%m%d%H%M%S")
     ext = File.extname file
     base = File.basename file, ext
     dir = File.dirname file
-    "#{dir}/#{base}#{current_time}#{ext}"
+    "#{dir}/#{base}#{time_pathsafe}#{ext}"
   end
 
   namespace :db do
     task :dump do
       root_dir = [deploy_to, current_dir].join('/')
 
-      remote_dump_env = ENV['REMOTE_DUMP_ENV']
+      remote_dump_env  = ENV['REMOTE_DUMP_ENV']
       remote_dump_file = ENV['REMOTE_DUMP_FILE'] || [root_dir, 'db', 'data.yml'].join('/')
       remote_rails_env = ENV['RAILS_ENV'] || 'production'
 
@@ -142,7 +145,7 @@ RewriteRule ^(.*)$ http://localhost:#{fetch :passenger_port}/$1 [P]
           true
         end
       end
-      local_destination = ENV['DUMP_FILE'] || 'db/data.yml'
+      local_destination = ENV['DUMP_FILE'] || "db/data.#{time_pathsafe}.yml"
       backup_local = string_to_b(ENV['BACKUP'] || 'true')
       keep_remote_dump = string_to_b(ENV['KEEP_REMOTE_DUMP'] || 'false')
 
@@ -166,28 +169,14 @@ RewriteRule ^(.*)$ http://localhost:#{fetch :passenger_port}/$1 [P]
   end
 
   namespace :files do
+    desc 'Downloads the public/uploaded files in a zip (default is "public/system")'
     task :dump do
-      puts require 'base64'
       root_dir = [deploy_to, current_dir].join('/')
       data_folder = ENV['DATA_DIR'] || 'public/system'
-      backup = string_to_b(ENV['BACKUP'] || 'true')
-      file_map = {}
-      dump_script = <<-EOF
-        cd #{root_dir}
-        zip -r - #{data_folder} 2>/dev/null | base64
-      EOF
-      dump_script = dump_script.lines.map(&:strip).join("; ")
-      run dump_script do |c, s, d|
-        file_map[c[:hostname]] ||= begin
-          current_time = Time.now.strftime("%Y%m%d%H%M%S")
-          ["files", current_time, c[:hostname], "zip"].compact.join(".")
-        end
-        if s == :out
-          File.open(file_map[c[:hostname]], 'a') do |file|
-            file.write Base64.decode64 d
-          end
-        end
-      end
+      via = (ENV['VIA'] || 'scp').downcase.to_sym
+      local_path = ["files", time_pathsafe].join(".")
+      path = [root_dir, data_folder].join("/")
+      download(path, local_path, via: via, recursive: true)
     end
   end
 end
