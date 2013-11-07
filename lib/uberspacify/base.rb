@@ -105,4 +105,89 @@ RewriteRule ^(.*)$ http://localhost:#{fetch :passenger_port}/$1 [P]
     end
   end
 
+  def string_to_b(string) # to boolean
+    case string.downcase
+    when 'no', 'false' then false
+    when 'yes', 'true' then true
+    else
+      if block_given? && !!(b = yield(string)) == b # is a boolean
+        b
+      else
+        raise("Cannot convert #{string.inspect} to boolean.")
+      end
+    end
+  end
+
+  def to_past_filename(file)
+    current_time = Time.now.strftime("%Y%m%d%H%M%S")
+    ext = File.extname file
+    base = File.basename file, ext
+    dir = File.dirname file
+    "#{dir}/#{base}#{current_time}#{ext}"
+  end
+
+  namespace :db do
+    task :dump do
+      root_dir = [deploy_to, current_dir].join('/')
+
+      remote_dump_env = ENV['REMOTE_DUMP_ENV']
+      remote_dump_file = ENV['REMOTE_DUMP_FILE'] || [root_dir, 'db', 'data.yml'].join('/')
+      remote_rails_env = ENV['RAILS_ENV'] || 'production'
+
+      local_load_env = ENV['LOAD_ENV']
+      local_rails_env = 'development'
+      load_to_db = string_to_b(ENV['LOAD'] || 'false') do |s|
+        if ['development', 'production', 'test'].include? s
+          local_rails_env = s
+          true
+        end
+      end
+      local_destination = ENV['DUMP_FILE'] || 'db/data.yml'
+      backup_local = string_to_b(ENV['BACKUP'] || 'true')
+      keep_remote_dump = string_to_b(ENV['KEEP_REMOTE_DUMP'] || 'false')
+
+      dump_script = <<-EOF
+        cd #{root_dir}
+        [ -f #{remote_dump_file} ] && mv #{remote_dump_file} #{to_past_filename(remote_dump_file)}
+        bundle exec rake db:data:dump RAILS_ENV=#{remote_rails_env} #{remote_dump_env} 
+      EOF
+      dump_script = dump_script.lines.map(&:strip).join("; ")
+      run(dump_script)
+      data = capture("cat #{remote_dump_file}")
+      run("rm #{remote_dump_file}") unless keep_remote_dump
+      if backup_local && File.file?(local_destination)
+        File.rename local_destination, to_past_filename(local_destination)
+      end
+
+      File.write(local_destination, data)
+
+      run_locally("bundle exec rake db:data:load RAILS_ENV=#{local_rails_env} #{local_load_env}") if load_to_db
+    end
+  end
+
+  namespace :files do
+    task :dump do
+      puts require 'base64'
+      root_dir = [deploy_to, current_dir].join('/')
+      data_folder = ENV['DATA_DIR'] || 'public/system'
+      backup = string_to_b(ENV['BACKUP'] || 'true')
+      file_map = {}
+      dump_script = <<-EOF
+        cd #{root_dir}
+        zip -r - #{data_folder} 2>/dev/null | base64
+      EOF
+      dump_script = dump_script.lines.map(&:strip).join("; ")
+      run dump_script do |c, s, d|
+        file_map[c[:hostname]] ||= begin
+          current_time = Time.now.strftime("%Y%m%d%H%M%S")
+          ["files", current_time, c[:hostname], "zip"].compact.join(".")
+        end
+        if s == :out
+          File.open(file_map[c[:hostname]], 'a') do |file|
+            file.write Base64.decode64 d
+          end
+        end
+      end
+    end
+  end
 end
