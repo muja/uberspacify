@@ -15,7 +15,7 @@ Capistrano::Configuration.instance.load do
           'encoding' => 'utf8',
           'database' => "#{fetch :user}_rails_#{fetch :application}_#{env}",
           'host' => 'localhost',
-          'pool' => fetch :db_pool
+          'pool' => fetch(:db_pool)
         }
 
         my_cnf.match(/^user=(\w+)/)
