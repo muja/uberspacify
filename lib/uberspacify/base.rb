@@ -1,5 +1,6 @@
 require 'capistrano_colors'
 require 'bundler/capistrano'
+require 'securerandom'
 
 def abort_red(msg)
   abort "  * \e[#{1};31mERROR: #{msg}\e[0m"
@@ -51,6 +52,7 @@ Capistrano::Configuration.instance.load do
       daemon_script = <<-EOF
 #!/bin/bash
 export HOME=#{fetch :home}
+export SECRET_KEY_BASE=#{SecureRandom.hex(64)}
 source $HOME/.bash_profile
 cd #{fetch :deploy_to}/current
 exec bundle exec rails s -p #{fetch :passenger_port} -e production 2>&1
